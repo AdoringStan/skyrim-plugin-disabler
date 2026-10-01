@@ -13,6 +13,32 @@ cmake --build --preset release-linux-clangcl-vcpkg-all
 ## Intellisense
 For IntelliSense, install clangd in VS Code.
 
+## Plugin Disabler configuration
+
+Create one or more `.json` files in `Data/SKSE/plugins/PluginDisabler` in the
+Skyrim game installation. Each file must contain a JSON array of plugin names:
+
+```json
+[
+	"plugina.esp",
+	"pluginb.esl",
+	"pluginc.esm"
+]
+```
+
+The plugin combines the names from all JSON files, ignoring filename case and
+duplicate entries. It removes the enabled `*` marker from matching lines in
+`%LOCALAPPDATA%/Skyrim Special Edition/plugins.txt` (or `Skyrim VR/plugins.txt`
+for Skyrim VR). It does not remove the entries from the file.
+SKSE 2.2.7 and newer run this change during preload, before Skyrim reads the
+plugin list. Older SKSE versions use the normal load callback as a fallback;
+if Skyrim has already read `plugins.txt` by then, the change takes effect on the
+next launch instead.
+
+Invalid JSON files and invalid plugin names are skipped and reported in the
+SKSE log. With a mod manager, verify that the resolved `plugins.txt` belongs to
+the active profile before relying on the change.
+
 ## Testing
 This is AI Generated, haven't personally test this:
 Tests are disabled by default. To enable them, add the `tests` feature to
@@ -26,3 +52,9 @@ Tests are disabled by default. To enable them, add the `tests` feature to
 
 Then change `BUILD_TESTS` in `CMakeLists.txt` from `OFF` to `ON` and re-run the
 configure and build commands above.
+
+## TODO
+[ ] test preload support on latest Skyrim version
+[ ] add support for mod manager (MO2, Amethyst) with a simple .ini entry to give a path to another plugins.txt
+[ ] add an ingame notification for the amount of plugins disabled
+[ ] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available

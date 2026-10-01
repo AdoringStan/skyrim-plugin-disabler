@@ -3,7 +3,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # Set your project name. This will be the name of your SKSE .dll file.
-project(HelloWorld VERSION 0.0.1 LANGUAGES CXX)
+project(PluginDisabler VERSION 0.0.1 LANGUAGES CXX)
 
 # If you're not using a mod manager, you probably want the SKSE plugin to go
 # inside of your Skyrim "Data" folder.
@@ -55,6 +55,8 @@ add_library(${PROJECT_NAME} SHARED
 	"${CMAKE_CURRENT_BINARY_DIR}/PluginInfo.cpp"
 ) # <--- specifies main.cpp
 target_link_libraries(${PROJECT_NAME} PRIVATE CommonLibSSE::CommonLibSSE)
+find_package(nlohmann_json CONFIG REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE nlohmann_json::nlohmann_json)
 target_compile_options(${PROJECT_NAME}
 	PRIVATE
 		-Wno-invalid-noreturn
