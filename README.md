@@ -35,6 +35,26 @@ plugin list. Older SKSE versions use the normal load callback as a fallback;
 if Skyrim has already read `plugins.txt` by then, the change takes effect on the
 next launch instead.
 
+### Mod manager profile path
+
+The plugin always updates the standard Local AppData `plugins.txt` path. To
+also update one or more mod manager profile files, create
+`Data/SKSE/plugins/PluginDisabler.ini` with numbered absolute paths:
+
+```ini
+[Paths]
+PluginsTxtPath1=Z:\path\to\first\profile\plugins.txt
+PluginsTxtPath2=Z:\path\to\second\profile\plugins.txt
+```
+
+Use the path for the profile the manager launches with. Under Proton, enter a
+Windows-style path visible to the game; `Z:` usually maps to the Linux
+filesystem. Add entries sequentially as `PluginsTxtPath1`, `PluginsTxtPath2`,
+and so on, up to `PluginsTxtPath64`; missing numbers are ignored. Invalid
+relative paths are skipped. If no numbered path is set, only the default Local
+AppData file is updated. The plugin does not discover or select manager profiles
+automatically. Duplicate paths are processed once.
+
 Invalid JSON files and invalid plugin names are skipped and reported in the
 SKSE log. With a mod manager, verify that the resolved `plugins.txt` belongs to
 the active profile before relying on the change.
@@ -55,6 +75,5 @@ configure and build commands above.
 
 ## TODO
 [ ] test preload support on latest Skyrim version
-[ ] add support for mod manager (MO2, Amethyst) with a simple .ini entry to give a path to another plugins.txt
 [ ] add an ingame notification for the amount of plugins disabled
 [ ] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available

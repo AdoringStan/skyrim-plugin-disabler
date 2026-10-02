@@ -151,6 +151,55 @@ std::filesystem::path GetPluginsListPath() {
   return GetLocalAppDataPath() / gameFolder / L"plugins.txt";
 }
 
+std::vector<std::filesystem::path>
+GetPluginsListPaths(const std::filesystem::path &a_iniPath) {
+  const auto defaultPath = GetPluginsListPath();
+  std::vector<std::filesystem::path> paths{defaultPath};
+  constexpr unsigned int maxConfiguredPaths = 64;
+  std::vector<wchar_t> buffer(32768);
+  bool foundConfiguredPath = false;
+  for (unsigned int index = 1; index <= maxConfiguredPaths; ++index) {
+    const auto key = L"PluginsTxtPath" + std::to_wstring(index);
+    const auto length = GetPrivateProfileStringW(
+        L"Paths", key.c_str(), L"", buffer.data(),
+        static_cast<DWORD>(buffer.size()), a_iniPath.c_str());
+    if (length == 0) {
+      continue;
+    }
+    foundConfiguredPath = true;
+    if (length >= buffer.size() - 1) {
+      logs::error("{} is too long in {}; skipping this path",
+                  std::filesystem::path(key).string(), a_iniPath.string());
+      continue;
+    }
+
+    const std::filesystem::path configuredPath(
+        std::wstring(buffer.data(), length));
+    if (!configuredPath.is_absolute()) {
+      logs::error("{} must be an absolute path in {}; skipping this path",
+                  std::filesystem::path(key).string(), a_iniPath.string());
+      continue;
+    }
+
+    const auto normalizedPath = configuredPath.lexically_normal();
+    const auto alreadyIncluded =
+        std::any_of(paths.begin(), paths.end(), [&](const auto &existingPath) {
+          return existingPath.lexically_normal() == normalizedPath;
+        });
+    if (!alreadyIncluded) {
+      logs::info("Using configured plugins.txt path from {}: {}",
+                 std::filesystem::path(key).string(), configuredPath.string());
+      paths.push_back(configuredPath);
+    }
+  }
+  if (!foundConfiguredPath) {
+    logs::info("No numbered PluginsTxtPath entries set in {}; using only the "
+               "default path",
+               a_iniPath.string());
+  }
+  return paths;
+}
+
 void DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
                           const std::set<std::string> &a_disabledPlugins) {
   std::ifstream input(a_pluginsListPath);
@@ -183,7 +232,8 @@ void DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
   }
   input.close();
   if (disabledCount == 0) {
-    logs::info("No configured plugins were enabled in plugins.txt");
+    logs::info("No configured plugins were enabled in {}",
+               a_pluginsListPath.string());
     return;
   }
 
@@ -207,12 +257,14 @@ void DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
     const auto errorCode = GetLastError();
     std::error_code cleanupError;
     std::filesystem::remove(temporaryPath, cleanupError);
-    throw std::system_error(
-      static_cast<int>(errorCode), std::system_category(),
-      "Could not replace plugins.txt at " + a_pluginsListPath.string() +
-        " using temporary file " + std::filesystem::path(temporaryPath).string());
+    throw std::system_error(static_cast<int>(errorCode), std::system_category(),
+                            "Could not replace plugins.txt at " +
+                                a_pluginsListPath.string() +
+                                " using temporary file " +
+                                std::filesystem::path(temporaryPath).string());
   }
-  logs::info("Disabled {} plugin(s) in plugins.txt", disabledCount);
+  logs::info("Disabled {} plugin(s) in {}", disabledCount,
+             a_pluginsListPath.string());
 }
 
 void RunPluginDisabler(std::string_view a_phase) {
@@ -220,9 +272,18 @@ void RunPluginDisabler(std::string_view a_phase) {
     const auto executablePath = GetExecutablePath();
     const auto configDirectory = executablePath.parent_path() / L"Data" /
                                  L"SKSE" / L"plugins" / L"PluginDisabler";
+    const auto iniPath = executablePath.parent_path() / L"Data" / L"SKSE" /
+                         L"plugins" / L"PluginDisabler.ini";
     const auto disabledPlugins = ReadDisabledPlugins(configDirectory);
     if (!disabledPlugins.empty()) {
-      DisableListedPlugins(GetPluginsListPath(), disabledPlugins);
+      for (const auto &pluginsListPath : GetPluginsListPaths(iniPath)) {
+        try {
+          DisableListedPlugins(pluginsListPath, disabledPlugins);
+        } catch (const std::exception &error) {
+          logs::error("Failed processing plugins.txt at {}: {}",
+                      pluginsListPath.string(), error.what());
+        }
+      }
     }
     logs::info("Loaded {} plugin name(s) from PluginDisabler config during {}",
                disabledPlugins.size(), a_phase);
