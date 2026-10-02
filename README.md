@@ -55,6 +55,17 @@ relative paths are skipped. If no numbered path is set, only the default Local
 AppData file is updated. The plugin does not discover or select manager profiles
 automatically. Duplicate paths are processed once.
 
+When one or more entries are disabled in the standard Local AppData
+`plugins.txt`, a message box reports that file's count and the path to
+`PluginDisabler.log`. Manager-profile files are still updated, but their counts
+are not included in the dialog. With SKSE 2.2.7 or newer, it is informational
+because preload runs before Skyrim reads the plugin list. With older SKSE, the
+message offers to force-terminate Skyrim; choosing Yes may lose unsaved
+progress. The plugin does not relaunch the game. Start it again through the same
+mod manager or launcher.
+After a successful file update, `PluginDisabler.log` lists the disabled plugin
+names under a section labeled with that `plugins.txt` path.
+
 Invalid JSON files and invalid plugin names are skipped and reported in the
 SKSE log. With a mod manager, verify that the resolved `plugins.txt` belongs to
 the active profile before relying on the change.
@@ -74,6 +85,6 @@ Then change `BUILD_TESTS` in `CMakeLists.txt` from `OFF` to `ON` and re-run the
 configure and build commands above.
 
 ## TODO
-[ ] test preload support on latest Skyrim version
+[x] test preload support on latest Skyrim version
 [ ] add an ingame notification for the amount of plugins disabled
 [ ] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available

@@ -90,6 +90,12 @@ bool IsPluginFilename(const std::string &a_name) {
   return extension == ".esp" || extension == ".esl" || extension == ".esm";
 }
 
+struct DisableSummary {
+  std::size_t appDataDisabledEntries{};
+};
+
+DisableSummary preloadSummary;
+
 std::set<std::string>
 ReadDisabledPlugins(const std::filesystem::path &a_configDirectory) {
   std::set<std::string> disabledPlugins;
@@ -187,8 +193,6 @@ GetPluginsListPaths(const std::filesystem::path &a_iniPath) {
           return existingPath.lexically_normal() == normalizedPath;
         });
     if (!alreadyIncluded) {
-      logs::info("Using configured plugins.txt path from {}: {}",
-                 std::filesystem::path(key).string(), configuredPath.string());
       paths.push_back(configuredPath);
     }
   }
@@ -200,15 +204,19 @@ GetPluginsListPaths(const std::filesystem::path &a_iniPath) {
   return paths;
 }
 
-void DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
-                          const std::set<std::string> &a_disabledPlugins) {
+std::size_t
+DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
+                     const std::set<std::string> &a_disabledPlugins) {
   std::ifstream input(a_pluginsListPath);
   if (!input) {
+    logs::info(
+        "----------------------------------------------------------------");
     logs::warn("Could not open plugins.txt: {}", a_pluginsListPath.string());
-    return;
+    return 0;
   }
 
   std::vector<std::string> lines;
+  std::vector<std::string> disabledPluginNames;
   std::string line;
   std::size_t disabledCount = 0;
   while (std::getline(input, line)) {
@@ -220,6 +228,7 @@ void DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
       if (marker < line.size() && line[marker] == '*') {
         const auto pluginName = NormalizePluginName(line.substr(marker + 1));
         if (a_disabledPlugins.contains(pluginName)) {
+          disabledPluginNames.push_back(line.substr(marker + 1));
           line.erase(marker, 1);
           ++disabledCount;
         }
@@ -234,7 +243,7 @@ void DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
   if (disabledCount == 0) {
     logs::info("No configured plugins were enabled in {}",
                a_pluginsListPath.string());
-    return;
+    return 0;
   }
 
   const auto temporaryPath =
@@ -263,11 +272,18 @@ void DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
                                 " using temporary file " +
                                 std::filesystem::path(temporaryPath).string());
   }
-  logs::info("Disabled {} plugin(s) in {}", disabledCount,
+  logs::info(
+      "----------------------------------------------------------------");
+  logs::info("Disabled {} plugin(s) in {}:", disabledCount,
              a_pluginsListPath.string());
+  for (const auto &pluginName : disabledPluginNames) {
+    logs::info("  {}", pluginName);
+  }
+  return disabledCount;
 }
 
-void RunPluginDisabler(std::string_view a_phase) {
+DisableSummary RunPluginDisabler(std::string_view a_phase) {
+  DisableSummary summary;
   try {
     const auto executablePath = GetExecutablePath();
     const auto configDirectory = executablePath.parent_path() / L"Data" /
@@ -276,19 +292,82 @@ void RunPluginDisabler(std::string_view a_phase) {
                          L"plugins" / L"PluginDisabler.ini";
     const auto disabledPlugins = ReadDisabledPlugins(configDirectory);
     if (!disabledPlugins.empty()) {
-      for (const auto &pluginsListPath : GetPluginsListPaths(iniPath)) {
+      const auto pluginsListPaths = GetPluginsListPaths(iniPath);
+      for (std::size_t index = 0; index < pluginsListPaths.size(); ++index) {
+        const auto &pluginsListPath = pluginsListPaths[index];
         try {
-          DisableListedPlugins(pluginsListPath, disabledPlugins);
+          const auto disabledEntries =
+              DisableListedPlugins(pluginsListPath, disabledPlugins);
+          if (index == 0) {
+            summary.appDataDisabledEntries = disabledEntries;
+          }
         } catch (const std::exception &error) {
           logs::error("Failed processing plugins.txt at {}: {}",
                       pluginsListPath.string(), error.what());
         }
       }
+      // seprator for log
+      logs::info(
+          "----------------------------------------------------------------");
     }
     logs::info("Loaded {} plugin name(s) from PluginDisabler config during {}",
                disabledPlugins.size(), a_phase);
   } catch (const std::exception &error) {
     logs::error("PluginDisabler failed during {}: {}", a_phase, error.what());
+  }
+  return summary;
+}
+
+bool TerminateGameProcess() {
+  logs::warn("Force-terminating Skyrim at the user's request");
+  spdlog::default_logger()->flush();
+  if (!TerminateProcess(GetCurrentProcess(), 0)) {
+    const auto errorCode = GetLastError();
+    logs::error("Could not terminate the Skyrim process: {}", errorCode);
+    return false;
+  }
+  return true;
+}
+
+void ShowDisableSummary(const DisableSummary &a_summary,
+                        bool a_restartRequired) {
+  if (a_summary.appDataDisabledEntries == 0) {
+    return;
+  }
+
+  std::wstring message =
+      std::to_wstring(a_summary.appDataDisabledEntries) + L" plugin entr" +
+      (a_summary.appDataDisabledEntries == 1 ? L"y" : L"ies") +
+      L" disabled in the game's AppData plugins.txt.\n\n";
+  if (const auto logDirectory = SKSE::log::log_directory()) {
+    message += L"Log: " + (*logDirectory / L"PluginDisabler.log").wstring();
+  } else {
+    message += L"See the SKSE log directory for PluginDisabler.log.";
+  }
+
+  UINT flags = MB_ICONINFORMATION | MB_SETFOREGROUND;
+  if (a_restartRequired) {
+    message +=
+        L"\n\nIf you see the plugins active in your mod manager, try "
+        L"refreshing, otherwise check if your mod manager uses a separate "
+        L"plugins.txt."
+        L"\n\nThe current game session may already have loaded these plugins. "
+        L"Force-terminate Skyrim now?";
+    flags |= MB_YESNO | MB_DEFBUTTON1;
+  } else {
+    message +=
+        L"\n\nThe plugins were disabled before Skyrim loaded its plugin list.";
+    flags |= MB_OK;
+  }
+
+  const auto result =
+      MessageBoxW(nullptr, message.c_str(), L"Plugin Disabler", flags);
+  if (a_restartRequired && result == IDYES && !TerminateGameProcess()) {
+    MessageBoxW(nullptr,
+                L"Plugin Disabler could not terminate Skyrim. "
+                L"Please close the game manually and relaunch it through your "
+                L"usual launcher or mod manager.",
+                L"Plugin Disabler", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
   }
 }
 } // namespace
@@ -296,7 +375,7 @@ void RunPluginDisabler(std::string_view a_phase) {
 SKSE_PLUGIN_PRELOAD(const SKSE::PreLoadInterface *a_skse) {
   SKSE::Init(a_skse);
   logs::info("SKSE_PLUGIN_PRELOAD");
-  RunPluginDisabler("preload");
+  preloadSummary = RunPluginDisabler("preload");
   return true;
 }
 
@@ -306,12 +385,16 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface *a_skse) {
 
   const auto skseVersion = REL::Version::unpack(SKSE::GetSKSEVersion());
   logs::info("Detected SKSE version {}", skseVersion.string());
+  auto summary = preloadSummary;
+  bool restartRequired = false;
   if (skseVersion < REL::Version(2, 2, 7)) {
     logs::warn("SKSE {} does not support preload; using the normal load phase. "
                "If Skyrim has already read plugins.txt, changes apply next "
                "launch",
                skseVersion.string());
-    RunPluginDisabler("normal load fallback");
+    summary = RunPluginDisabler("normal load fallback");
+    restartRequired = true;
   }
+  ShowDisableSummary(summary, restartRequired);
   return true;
 }
