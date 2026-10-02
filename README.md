@@ -86,7 +86,7 @@ I'm not sure on how to build for Windows since I do not have a Windows system, b
 For IntelliSense, install clangd in VS Code.
 
 ## TODO
-[ ] test preload support on latest Skyrim version
-[ ] test on SkyrimVR
-[X] add an ingame notification for the amount of plugins disabled
-[X] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available
+- [ ] test preload support on latest Skyrim version
+- [ ] test on SkyrimVR
+- [X] add an ingame notification for the amount of plugins disabled
+- [X] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available
