@@ -157,6 +157,17 @@ std::filesystem::path GetPluginsListPath() {
   return GetLocalAppDataPath() / gameFolder / L"plugins.txt";
 }
 
+std::filesystem::path GetPluginDisablerIniPath() {
+  return GetExecutablePath().parent_path() / L"Data" / L"SKSE" / L"plugins" /
+         L"PluginDisabler.ini";
+}
+
+bool ForceTerminateAfterFallback() {
+  const auto iniPath = GetPluginDisablerIniPath();
+  return GetPrivateProfileIntW(L"General", L"ForceTerminateAfterFallback", 0,
+                               iniPath.c_str()) == 1;
+}
+
 std::vector<std::filesystem::path>
 GetPluginsListPaths(const std::filesystem::path &a_iniPath) {
   const auto defaultPath = GetPluginsListPath();
@@ -288,8 +299,7 @@ DisableSummary RunPluginDisabler(std::string_view a_phase) {
     const auto executablePath = GetExecutablePath();
     const auto configDirectory = executablePath.parent_path() / L"Data" /
                                  L"SKSE" / L"plugins" / L"PluginDisabler";
-    const auto iniPath = executablePath.parent_path() / L"Data" / L"SKSE" /
-                         L"plugins" / L"PluginDisabler.ini";
+    const auto iniPath = GetPluginDisablerIniPath();
     const auto disabledPlugins = ReadDisabledPlugins(configDirectory);
     if (!disabledPlugins.empty()) {
       const auto pluginsListPaths = GetPluginsListPaths(iniPath);
@@ -329,8 +339,8 @@ bool TerminateGameProcess() {
   return true;
 }
 
-void ShowDisableSummary(const DisableSummary &a_summary,
-                        bool a_restartRequired) {
+void ShowDisableSummary(const DisableSummary &a_summary, bool a_restartRequired,
+                        bool a_forceTerminateOnAcknowledge) {
   if (a_summary.appDataDisabledEntries == 0) {
     return;
   }
@@ -351,9 +361,14 @@ void ShowDisableSummary(const DisableSummary &a_summary,
         L"\n\nIf you see the plugins active in your mod manager, try "
         L"refreshing, otherwise check if your mod manager uses a separate "
         L"plugins.txt."
-        L"\n\nThe current game session may already have loaded these plugins. "
-        L"Force-terminate Skyrim now?";
-    flags |= MB_YESNO | MB_DEFBUTTON1;
+        L"\n\nThe current game session may already have loaded these plugins. ";
+    if (a_forceTerminateOnAcknowledge) {
+      message += L"Click OK to quit Skyrim now.";
+      flags |= MB_OK;
+    } else {
+      message += L"Would you like to quit Skyrim now?";
+      flags |= MB_YESNO | MB_DEFBUTTON1;
+    }
   } else {
     message +=
         L"\n\nThe plugins were disabled before Skyrim loaded its plugin list.";
@@ -362,7 +377,10 @@ void ShowDisableSummary(const DisableSummary &a_summary,
 
   const auto result =
       MessageBoxW(nullptr, message.c_str(), L"Plugin Disabler", flags);
-  if (a_restartRequired && result == IDYES && !TerminateGameProcess()) {
+  const bool shouldTerminate =
+      a_restartRequired &&
+      (a_forceTerminateOnAcknowledge ? result == IDOK : result == IDYES);
+  if (shouldTerminate && !TerminateGameProcess()) {
     MessageBoxW(nullptr,
                 L"Plugin Disabler could not terminate Skyrim. "
                 L"Please close the game manually and relaunch it through your "
@@ -387,6 +405,7 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface *a_skse) {
   logs::info("Detected SKSE version {}", skseVersion.string());
   auto summary = preloadSummary;
   bool restartRequired = false;
+  bool forceTerminateOnAcknowledge = false;
   if (skseVersion < REL::Version(2, 2, 7)) {
     logs::warn("SKSE {} does not support preload; using the normal load phase. "
                "If Skyrim has already read plugins.txt, changes apply next "
@@ -394,7 +413,13 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface *a_skse) {
                skseVersion.string());
     summary = RunPluginDisabler("normal load fallback");
     restartRequired = true;
+    try {
+      forceTerminateOnAcknowledge = ForceTerminateAfterFallback();
+    } catch (const std::exception &error) {
+      logs::warn("Could not read ForceTerminateAfterFallback setting: {}",
+                 error.what());
+    }
   }
-  ShowDisableSummary(summary, restartRequired);
+  ShowDisableSummary(summary, restartRequired, forceTerminateOnAcknowledge);
   return true;
 }

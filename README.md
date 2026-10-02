@@ -60,11 +60,22 @@ When one or more entries are disabled in the standard Local AppData
 `PluginDisabler.log`. Manager-profile files are still updated, but their counts
 are not included in the dialog. With SKSE 2.2.7 or newer, it is informational
 because preload runs before Skyrim reads the plugin list. With older SKSE, the
-message offers to force-terminate Skyrim; choosing Yes may lose unsaved
-progress. The plugin does not relaunch the game. Start it again through the same
+message offers to force-terminate Skyrim. The plugin does not relaunch the game. Start it again through the same
 mod manager or launcher.
 After a successful file update, `PluginDisabler.log` lists the disabled plugin
 names under a section labeled with that `plugins.txt` path.
+
+For SKSE versions older than 2.2.7, the default message asks whether to
+force-terminate Skyrim. To instead make the message an OK-only notice that
+force-terminates the game when acknowledged, add this to
+`Data/SKSE/plugins/PluginDisabler.ini`:
+
+```ini
+[General]
+ForceTerminateAfterFallback=1
+```
+
+This setting has no effect when preload is supported.
 
 Invalid JSON files and invalid plugin names are skipped and reported in the
 SKSE log. With a mod manager, verify that the resolved `plugins.txt` belongs to
@@ -85,6 +96,6 @@ Then change `BUILD_TESTS` in `CMakeLists.txt` from `OFF` to `ON` and re-run the
 configure and build commands above.
 
 ## TODO
-[x] test preload support on latest Skyrim version
-[ ] add an ingame notification for the amount of plugins disabled
-[ ] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available
+[ ] test preload support on latest Skyrim version
+[X] add an ingame notification for the amount of plugins disabled
+[X] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available
