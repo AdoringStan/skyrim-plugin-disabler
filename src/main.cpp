@@ -92,9 +92,12 @@ bool IsPluginFilename(const std::string &a_name) {
 
 struct DisableSummary {
   std::size_t appDataDisabledEntries{};
+  std::set<std::string> pluginsToVerify;
 };
 
 DisableSummary preloadSummary;
+DisableSummary pendingSummary;
+bool forceTerminateOnVerificationFailure{};
 
 std::set<std::string>
 ReadDisabledPlugins(const std::filesystem::path &a_configDirectory) {
@@ -164,7 +167,7 @@ std::filesystem::path GetPluginDisablerIniPath() {
 
 bool ForceTerminateAfterFallback() {
   const auto iniPath = GetPluginDisablerIniPath();
-  return GetPrivateProfileIntW(L"General", L"ForceTerminateAfterFallback", 0,
+  return GetPrivateProfileIntW(L"General", L"ForceTerminateAfterFallback", 1,
                                iniPath.c_str()) == 1;
 }
 
@@ -215,9 +218,9 @@ GetPluginsListPaths(const std::filesystem::path &a_iniPath) {
   return paths;
 }
 
-std::size_t
-DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
-                     const std::set<std::string> &a_disabledPlugins) {
+std::size_t DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
+                                 const std::set<std::string> &a_disabledPlugins,
+                                 std::set<std::string> &a_changedPlugins) {
   std::ifstream input(a_pluginsListPath);
   if (!input) {
     logs::info(
@@ -290,6 +293,9 @@ DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
   for (const auto &pluginName : disabledPluginNames) {
     logs::info("  {}", pluginName);
   }
+  for (const auto &pluginName : disabledPluginNames) {
+    a_changedPlugins.insert(NormalizePluginName(pluginName));
+  }
   return disabledCount;
 }
 
@@ -306,11 +312,14 @@ DisableSummary RunPluginDisabler(std::string_view a_phase) {
       for (std::size_t index = 0; index < pluginsListPaths.size(); ++index) {
         const auto &pluginsListPath = pluginsListPaths[index];
         try {
-          const auto disabledEntries =
-              DisableListedPlugins(pluginsListPath, disabledPlugins);
+          std::set<std::string> changedPlugins;
+          const auto disabledEntries = DisableListedPlugins(
+              pluginsListPath, disabledPlugins, changedPlugins);
           if (index == 0) {
             summary.appDataDisabledEntries = disabledEntries;
           }
+          summary.pluginsToVerify.insert(changedPlugins.begin(),
+                                         changedPlugins.end());
         } catch (const std::exception &error) {
           logs::error("Failed processing plugins.txt at {}: {}",
                       pluginsListPath.string(), error.what());
@@ -339,16 +348,23 @@ bool TerminateGameProcess() {
   return true;
 }
 
-void ShowDisableSummary(const DisableSummary &a_summary, bool a_restartRequired,
+void ShowDisableSummary(const DisableSummary &a_summary,
+                        const std::set<std::string> &a_stillLoadedPlugins,
                         bool a_forceTerminateOnAcknowledge) {
-  if (a_summary.appDataDisabledEntries == 0) {
+  if (a_summary.appDataDisabledEntries == 0 &&
+      a_summary.pluginsToVerify.empty()) {
     return;
   }
 
-  std::wstring message =
-      std::to_wstring(a_summary.appDataDisabledEntries) + L" plugin entr" +
-      (a_summary.appDataDisabledEntries == 1 ? L"y" : L"ies") +
-      L" disabled in the game's AppData plugins.txt.\n\n";
+  std::wstring message;
+  if (a_summary.appDataDisabledEntries > 0) {
+    message = std::to_wstring(a_summary.appDataDisabledEntries) +
+              L" plugin entr" +
+              (a_summary.appDataDisabledEntries == 1 ? L"y" : L"ies") +
+              L" disabled in the game's AppData plugins.txt.\n\n";
+  } else {
+    message = L"PluginDisabler updated configured plugins.txt file(s).\n\n";
+  }
   if (const auto logDirectory = SKSE::log::log_directory()) {
     message += L"Log: " + (*logDirectory / L"PluginDisabler.log").wstring();
   } else {
@@ -356,12 +372,10 @@ void ShowDisableSummary(const DisableSummary &a_summary, bool a_restartRequired,
   }
 
   UINT flags = MB_ICONINFORMATION | MB_SETFOREGROUND;
-  if (a_restartRequired) {
-    message +=
-        L"\n\nIf you see the plugins active in your mod manager, try "
-        L"refreshing, otherwise check if your mod manager uses a separate "
-        L"plugins.txt."
-        L"\n\nThe current game session may already have loaded these plugins. ";
+  if (!a_stillLoadedPlugins.empty()) {
+    message += L"\n\nSome targeted plugins are still loaded in this game "
+               L"session. See the log for their names. The running session "
+               L"does not reflect the disable list. ";
     if (a_forceTerminateOnAcknowledge) {
       message += L"Click OK to quit Skyrim now.";
       flags |= MB_OK;
@@ -370,15 +384,15 @@ void ShowDisableSummary(const DisableSummary &a_summary, bool a_restartRequired,
       flags |= MB_YESNO | MB_DEFBUTTON1;
     }
   } else {
-    message +=
-        L"\n\nThe plugins were disabled before Skyrim loaded its plugin list.";
+    message += L"\n\nVerification complete: none of the plugins changed by "
+               L"PluginDisabler are loaded in this game session.";
     flags |= MB_OK;
   }
 
   const auto result =
       MessageBoxW(nullptr, message.c_str(), L"Plugin Disabler", flags);
   const bool shouldTerminate =
-      a_restartRequired &&
+      !a_stillLoadedPlugins.empty() &&
       (a_forceTerminateOnAcknowledge ? result == IDOK : result == IDYES);
   if (shouldTerminate && !TerminateGameProcess()) {
     MessageBoxW(nullptr,
@@ -387,6 +401,42 @@ void ShowDisableSummary(const DisableSummary &a_summary, bool a_restartRequired,
                 L"usual launcher or mod manager.",
                 L"Plugin Disabler", MB_OK | MB_ICONWARNING | MB_SETFOREGROUND);
   }
+}
+
+void OnSKSEMessage(SKSE::MessagingInterface::Message *a_message) {
+  if (!a_message || a_message->type != SKSE::MessagingInterface::kDataLoaded) {
+    return;
+  }
+
+  const auto dataHandler = RE::TESDataHandler::GetSingleton();
+  if (!dataHandler) {
+    logs::error("Could not verify disabled plugins: TESDataHandler is missing");
+    return;
+  }
+
+  std::set<std::string> stillLoadedPlugins;
+  for (const auto &pluginName : pendingSummary.pluginsToVerify) {
+    if (dataHandler->LookupLoadedModByName(pluginName) ||
+        dataHandler->LookupLoadedLightModByName(pluginName)) {
+      stillLoadedPlugins.insert(pluginName);
+    }
+  }
+
+  logs::info(
+      "----------------------------------------------------------------");
+  if (stillLoadedPlugins.empty()) {
+    logs::info("Post-load verification passed: none of the changed plugins "
+               "are loaded in this session");
+  } else {
+    logs::warn(
+        "Post-load verification found {} changed plugin(s) still loaded:",
+        stillLoadedPlugins.size());
+    for (const auto &pluginName : stillLoadedPlugins) {
+      logs::warn("  {}", pluginName);
+    }
+  }
+  ShowDisableSummary(pendingSummary, stillLoadedPlugins,
+                     forceTerminateOnVerificationFailure);
 }
 } // namespace
 
@@ -403,23 +453,30 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface *a_skse) {
 
   const auto skseVersion = REL::Version::unpack(SKSE::GetSKSEVersion());
   logs::info("Detected SKSE version {}", skseVersion.string());
-  auto summary = preloadSummary;
-  bool restartRequired = false;
-  bool forceTerminateOnAcknowledge = false;
+  pendingSummary = preloadSummary;
+  forceTerminateOnVerificationFailure = false;
+  try {
+    forceTerminateOnVerificationFailure = ForceTerminateAfterFallback();
+  } catch (const std::exception &error) {
+    logs::warn("Could not read ForceTerminateAfterFallback setting: {}",
+               error.what());
+  }
+
   if (skseVersion < REL::Version(2, 2, 7)) {
     logs::warn("SKSE {} does not support preload; using the normal load phase. "
                "If Skyrim has already read plugins.txt, changes apply next "
                "launch",
                skseVersion.string());
-    summary = RunPluginDisabler("normal load fallback");
-    restartRequired = true;
-    try {
-      forceTerminateOnAcknowledge = ForceTerminateAfterFallback();
-    } catch (const std::exception &error) {
-      logs::warn("Could not read ForceTerminateAfterFallback setting: {}",
-                 error.what());
-    }
+    pendingSummary = RunPluginDisabler("normal load fallback");
   }
-  ShowDisableSummary(summary, restartRequired, forceTerminateOnAcknowledge);
+  if (pendingSummary.pluginsToVerify.empty()) {
+    logs::info("No successfully changed plugin entries to verify after load");
+    return true;
+  }
+
+  const auto messaging = SKSE::GetMessagingInterface();
+  if (!messaging || !messaging->RegisterListener(OnSKSEMessage)) {
+    logs::error("Could not register for SKSE DataLoaded verification");
+  }
   return true;
 }

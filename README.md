@@ -43,22 +43,37 @@ filesystem.
 
 ### auto-closing the game
 
-By default, on SKSE versions older than 2.2.7, the game will autoclose after showing a message box giving the amount of plugins disabled. To change this behavior, change the ini file:
+After Skyrim finishes loading its plugins, Plugin Disabler checks whether any
+plugin it changed is still loaded in the current session. If none are loaded,
+it reports that verification succeeded. If any remain loaded, the message box
+offers to quit Skyrim without listing each plugin; the names of still-loaded
+plugins are written to `PluginDisabler.log`. Set `ForceTerminateAfterFallback=1` to make any
+verification-failure message OK-only and quit the game when acknowledged,
+regardless of SKSE version. The default is `1`, which will autoclose the game.
+
 ```ini
 [General]
-ForceTerminateAfterFallback=0
+ForceTerminateAfterFallback=1
 ```
 
-This setting has no effect when preload is supported, since there is no need to restart the game.
+On SKSE 2.2.7 and newer, the plugin still edits `plugins.txt` during preload,
+before Skyrim loads its plugins, and then verifies the result after the
+data-loaded message. The setting changes only what happens if verification
+finds one or more targeted plugins still loaded.
 
 # how it works
 The plugin combines the names from all JSON files in SKSE/Plugins/PluginDisabler, ignoring filename case and duplicate entries. It removes the enabled `*` marker from matching lines in
 `%LOCALAPPDATA%/Skyrim Special Edition/plugins.txt` (or `Skyrim VR/plugins.txt`
 for Skyrim VR) as well as any other configured plugins.txt files. It does not remove the entries from the file. SKSE 2.2.7 and newer run this change during preload, before Skyrim reads the
-plugin list.
+plugin list. After the game reports that its data is loaded, the plugin checks
+the changed names against Skyrim's loaded regular and light-plugin lists. The
+version check is retained: SKSE 2.2.7 and newer use preload; older versions use
+the normal load callback as a fallback, followed by the same runtime check.
 
-Older SKSE versions use the normal load callback as a fallback;
-if Skyrim has already read `plugins.txt` by then (which I believe it always does), the change takes effect on the next launch instead. Because of this, a message box will show how many plugins were disabled and then close the game or give the option to continue based on the user's configuration.
+The post-load message only offers to quit when a plugin that was changed is
+actually present in the current session. The INI option controls whether
+acknowledging that message force-terminates the game or presents a Yes/No choice,
+regardless of SKSE version.
 
 Invalid JSON files and invalid plugin names are skipped and reported in the
 SKSE log.
