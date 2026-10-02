@@ -1,20 +1,17 @@
-Full disclosure: I smashed this template together with an unholy fusion of Bing, then Claude when I ran out of tokens, and then finally copilot in VSCode when I discovered it could read through all my code and make suggestions. I'm not aware of templates for building plugins on Linux, so I thought I'd do it myself. If anyone is aware of resources from people who actually know what they're doing, please let me know.
+# Plugin Disabler
+Plugin Disabler is an SKSE plugin that automatically disables Skyrim plugins (esl, esp, and esm files) on game load. On older versions of Skyrim this will require a restart. If no plugins are disabled, then nothing happens and your game launches as usual.
 
-I used resources from the Linux cross-compiling in [alandtse/CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG/blob/ng/examples/linux-cross-compile/README.md), [mrowrpurr's Logging SKSE Template](https://github.com/SkyrimScripting/SKSE_Template_Logging), and this [commonlibsse-ng-template](https://github.com/libxse/commonlibsse-ng-template). It's somehow working. Please God forgive me.
+Back up your load order before use.
 
-## Building
-You will first need to follow the one-time setup guide on the [Linux cross-compile readme](https://github.com/alandtse/CommonLibSSE-NG/blob/ng/examples/linux-cross-compile/README.md) in [alandtse/CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG). After that, you should be able to run the build command in the project root:
+## y tho?
+I have a few use cases for this actually:
+- merged patches (for example, those included in many of the QND Spid Packs) could include a file to automatically disable the plugins they merge
+- certain xedit and Synthesis patchers can convert plugins to BOS/Skypatcher/etc files. If a plugin is 100% replaced, the patcher could generate a config for this plugin to automatically disable those plugins to save space in the LO
+- mod list creators - some mods require other mods, but ask you to disable their esps. If a modlist creator wants to keep users from accidentally enabling esp files, they can include a configuration for this.
 
-```sh
-cmake --preset build-release-linux-clangcl-vcpkg-all
-cmake --build --preset release-linux-clangcl-vcpkg-all
-```
+# configuration
 
-## Intellisense
-For IntelliSense, install clangd in VS Code.
-
-## Plugin Disabler configuration
-
+## disabling plugins
 Create one or more `.json` files in `Data/SKSE/plugins/PluginDisabler` in the
 Skyrim game installation. Each file must contain a JSON array of plugin names:
 
@@ -26,20 +23,12 @@ Skyrim game installation. Each file must contain a JSON array of plugin names:
 ]
 ```
 
-The plugin combines the names from all JSON files, ignoring filename case and
-duplicate entries. It removes the enabled `*` marker from matching lines in
-`%LOCALAPPDATA%/Skyrim Special Edition/plugins.txt` (or `Skyrim VR/plugins.txt`
-for Skyrim VR). It does not remove the entries from the file.
-SKSE 2.2.7 and newer run this change during preload, before Skyrim reads the
-plugin list. Older SKSE versions use the normal load callback as a fallback;
-if Skyrim has already read `plugins.txt` by then, the change takes effect on the
-next launch instead.
+## ini options
 
-### Mod manager profile path
+### mod manager profile path
 
 The plugin always updates the standard Local AppData `plugins.txt` path. To
-also update one or more mod manager profile files, create
-`Data/SKSE/plugins/PluginDisabler.ini` with numbered absolute paths:
+also update one or more mod manager profile files, the ini file can be edited to add up to 64 paths:
 
 ```ini
 [Paths]
@@ -47,55 +36,57 @@ PluginsTxtPath1=Z:\path\to\first\profile\plugins.txt
 PluginsTxtPath2=Z:\path\to\second\profile\plugins.txt
 ```
 
-Use the path for the profile the manager launches with. Under Proton, enter a
-Windows-style path visible to the game; `Z:` usually maps to the Linux
-filesystem. Add entries sequentially as `PluginsTxtPath1`, `PluginsTxtPath2`,
-and so on, up to `PluginsTxtPath64`; missing numbers are ignored. Invalid
-relative paths are skipped. If no numbered path is set, only the default Local
-AppData file is updated. The plugin does not discover or select manager profiles
-automatically. Duplicate paths are processed once.
+I use Amethyst mod manager since I am on Linux, so I will not be adding special MO2 or Vortex support. Adding a path to your plugins.txt should suffice for most mod managers. Please let me know if this doesn't work with your setup. Use the path for the profile the manager launches with.
 
-When one or more entries are disabled in the standard Local AppData
-`plugins.txt`, a message box reports that file's count and the path to
-`PluginDisabler.log`. Manager-profile files are still updated, but their counts
-are not included in the dialog. With SKSE 2.2.7 or newer, it is informational
-because preload runs before Skyrim reads the plugin list. With older SKSE, the
-message offers to force-terminate Skyrim. The plugin does not relaunch the game. Start it again through the same
-mod manager or launcher.
-After a successful file update, `PluginDisabler.log` lists the disabled plugin
-names under a section labeled with that `plugins.txt` path.
+Under Linux/Proton, enter a Windows-style path visible to the game; `Z:` usually maps to the Linux
+filesystem.
 
-For SKSE versions older than 2.2.7, the default message asks whether to
-force-terminate Skyrim. To instead make the message an OK-only notice that
-force-terminates the game when acknowledged, add this to
-`Data/SKSE/plugins/PluginDisabler.ini`:
+### auto-closing the game
 
+By default, on SKSE versions older than 2.2.7, the game will autoclose after showing a message box giving the amount of plugins disabled. To change this behavior, change the ini file:
 ```ini
 [General]
-ForceTerminateAfterFallback=1
+ForceTerminateAfterFallback=0
 ```
 
-This setting has no effect when preload is supported.
+This setting has no effect when preload is supported, since there is no need to restart the game.
+
+# how it works
+The plugin combines the names from all JSON files in SKSE/Plugins/PluginDisabler, ignoring filename case and duplicate entries. It removes the enabled `*` marker from matching lines in
+`%LOCALAPPDATA%/Skyrim Special Edition/plugins.txt` (or `Skyrim VR/plugins.txt`
+for Skyrim VR) as well as any other configured plugins.txt files. It does not remove the entries from the file. SKSE 2.2.7 and newer run this change during preload, before Skyrim reads the
+plugin list.
+
+Older SKSE versions use the normal load callback as a fallback;
+if Skyrim has already read `plugins.txt` by then (which I believe it always does), the change takes effect on the next launch instead. Because of this, a message box will show how many plugins were disabled and then close the game or give the option to continue based on the user's configuration.
 
 Invalid JSON files and invalid plugin names are skipped and reported in the
-SKSE log. With a mod manager, verify that the resolved `plugins.txt` belongs to
-the active profile before relying on the change.
+SKSE log.
 
-## Testing
-This is AI Generated, haven't personally test this:
-Tests are disabled by default. To enable them, add the `tests` feature to
-`default-features` in `vcpkg.json`:
+# On AI Use
 
-```json
-"default-features": [
-	"tests"
-]
+I used AI to help build this. It is tested and confirmed to be working on my end. My personal policy on AI usage is to not just use it as a crutch to build everything for me, but also as a tool to learn from, so I study all code generated by the AI to learn what it's doing and how it works to the best of my ability. That being said, while I do have some profesional experience with coding, it was mostly JS for websites and C# on the side for fun, so I am by no means an expert. I am a hobbyist. Please do not use this plugin if that makes you uncomfortable.
+
+# For Developers
+
+This has completely open permissions. If you would like to improve on this or want to steal the idea to completely redo it from the ground up for better performance and/or functionality, then please feel free to do so. The only request that I have is that you let me know so I can check it out myself. 🙂
+
+## Building
+
+This is based on my [linux hellow world template](https://github.com/AdoringStan/commonlibsse-ng-template-hello-world-linux). You will first need to follow the one-time setup guide on the [Linux cross-compile readme](https://github.com/alandtse/CommonLibSSE-NG/blob/ng/examples/linux-cross-compile/README.md) in [alandtse/CommonLibSSE-NG](https://github.com/alandtse/CommonLibSSE-NG). After that, you should be able to run the build command in the project root:
+
+```sh
+cmake --preset build-release-linux-clangcl-vcpkg-all
+cmake --build --preset release-linux-clangcl-vcpkg-all
 ```
 
-Then change `BUILD_TESTS` in `CMakeLists.txt` from `OFF` to `ON` and re-run the
-configure and build commands above.
+I'm not sure on how to build for Windows since I do not have a Windows system, but the cmake config was borrowed from CommonLibSSE-NG, so it should have built in Windows support.
+
+## Intellisense
+For IntelliSense, install clangd in VS Code.
 
 ## TODO
 [ ] test preload support on latest Skyrim version
+[ ] test on SkyrimVR
 [X] add an ingame notification for the amount of plugins disabled
 [X] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available
