@@ -90,3 +90,4 @@ For IntelliSense, install clangd in VS Code.
 - [ ] test on SkyrimVR
 - [X] add an ingame notification for the amount of plugins disabled
 - [X] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available
+- [ ] When a plugin is disabled that has dependent plugins, differ disabling it until the end, and if it's dependent plugins have not been disabled still, then give the user a warning and don't disable them. The game seems to reenable these on the next launch, so test if this is Vanilla behavior or not. Look into looking through plugins.txt in reverse so that hopefully dependents are disabled first.
