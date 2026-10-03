@@ -3,10 +3,13 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -90,6 +93,111 @@ bool IsPluginFilename(const std::string &a_name) {
   return extension == ".esp" || extension == ".esl" || extension == ".esm";
 }
 
+std::string TrimPluginName(std::string a_name) {
+  const auto isWhitespace = [](unsigned char a_character) {
+    return std::isspace(a_character) != 0;
+  };
+  const auto first =
+      std::find_if_not(a_name.begin(), a_name.end(), isWhitespace);
+  const auto last =
+      std::find_if_not(a_name.rbegin(), a_name.rend(), isWhitespace).base();
+  return first < last ? std::string(first, last) : std::string{};
+}
+
+std::uint16_t ReadUInt16LE(const unsigned char *a_data) {
+  return static_cast<std::uint16_t>(a_data[0]) |
+         static_cast<std::uint16_t>(a_data[1] << 8);
+}
+
+std::uint32_t ReadUInt32LE(const unsigned char *a_data) {
+  return static_cast<std::uint32_t>(a_data[0]) |
+         (static_cast<std::uint32_t>(a_data[1]) << 8) |
+         (static_cast<std::uint32_t>(a_data[2]) << 16) |
+         (static_cast<std::uint32_t>(a_data[3]) << 24);
+}
+
+std::optional<std::set<std::string>>
+ReadPluginMasters(const std::filesystem::path &a_pluginPath) {
+  std::ifstream file(a_pluginPath, std::ios::binary);
+  if (!file) {
+    return std::nullopt;
+  }
+
+  std::array<unsigned char, 24> recordHeader{};
+  file.read(reinterpret_cast<char *>(recordHeader.data()), recordHeader.size());
+  if (file.gcount() != static_cast<std::streamsize>(recordHeader.size()) ||
+      std::string_view(reinterpret_cast<const char *>(recordHeader.data()),
+                       4) != "TES4") {
+    return std::nullopt;
+  }
+
+  constexpr std::uint32_t compressedFlag = 0x00040000;
+  const auto recordFlags = ReadUInt32LE(recordHeader.data() + 8);
+  const auto recordSize = ReadUInt32LE(recordHeader.data() + 4);
+  constexpr std::uint32_t maxHeaderSize = 64 * 1024 * 1024;
+  if ((recordFlags & compressedFlag) != 0 || recordSize > maxHeaderSize) {
+    return std::nullopt;
+  }
+
+  std::vector<unsigned char> recordData(recordSize);
+  if (recordSize > 0) {
+    file.read(reinterpret_cast<char *>(recordData.data()), recordSize);
+    if (file.gcount() != static_cast<std::streamsize>(recordSize)) {
+      return std::nullopt;
+    }
+  }
+
+  std::set<std::string> masters;
+  std::optional<std::uint32_t> extendedSize;
+  std::size_t offset = 0;
+  while (offset < recordData.size()) {
+    if (recordData.size() - offset < 6) {
+      return std::nullopt;
+    }
+
+    const std::string_view subrecordType(
+        reinterpret_cast<const char *>(recordData.data() + offset), 4);
+    const auto subrecordSize = ReadUInt16LE(recordData.data() + offset + 4);
+    offset += 6;
+
+    if (subrecordType == "XXXX") {
+      if (subrecordSize != 4 || recordData.size() - offset < 4) {
+        return std::nullopt;
+      }
+      extendedSize = ReadUInt32LE(recordData.data() + offset);
+      offset += 4;
+      continue;
+    }
+
+    const auto payloadSize = extendedSize.value_or(subrecordSize);
+    extendedSize.reset();
+    if (payloadSize > recordData.size() - offset) {
+      return std::nullopt;
+    }
+
+    if (subrecordType == "MAST") {
+      const auto *nameData = recordData.data() + offset;
+      const auto *terminator = std::find(nameData, nameData + payloadSize, 0);
+      if (terminator == nameData + payloadSize) {
+        return std::nullopt;
+      }
+      const std::string masterName(
+          reinterpret_cast<const char *>(nameData),
+          static_cast<std::size_t>(terminator - nameData));
+      const auto normalizedMaster = NormalizePluginName(masterName);
+      if (IsPluginFilename(normalizedMaster)) {
+        masters.insert(normalizedMaster);
+      }
+    }
+    offset += payloadSize;
+  }
+
+  if (extendedSize) {
+    return std::nullopt;
+  }
+  return masters;
+}
+
 struct DisableSummary {
   std::size_t appDataDisabledEntries{};
   std::set<std::string> pluginsToVerify;
@@ -165,9 +273,10 @@ std::filesystem::path GetPluginDisablerIniPath() {
          L"PluginDisabler.ini";
 }
 
-bool ForceTerminateAfterFallback() {
+bool ForceTerminateIfPluginsStillPresent() {
   const auto iniPath = GetPluginDisablerIniPath();
-  return GetPrivateProfileIntW(L"General", L"ForceTerminateAfterFallback", 1,
+  return GetPrivateProfileIntW(L"General",
+                               L"ForceTerminateIfPluginsStillPresent", 1,
                                iniPath.c_str()) == 1;
 }
 
@@ -230,9 +339,8 @@ std::size_t DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
   }
 
   std::vector<std::string> lines;
-  std::vector<std::string> disabledPluginNames;
+  std::map<std::string, std::string> enabledPluginNames;
   std::string line;
-  std::size_t disabledCount = 0;
   while (std::getline(input, line)) {
     auto marker = line.find_first_not_of(" \t");
     if (marker != std::string::npos) {
@@ -240,12 +348,9 @@ std::size_t DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
         marker += 3;
       }
       if (marker < line.size() && line[marker] == '*') {
-        const auto pluginName = NormalizePluginName(line.substr(marker + 1));
-        if (a_disabledPlugins.contains(pluginName)) {
-          disabledPluginNames.push_back(line.substr(marker + 1));
-          line.erase(marker, 1);
-          ++disabledCount;
-        }
+        const auto displayName = line.substr(marker + 1);
+        enabledPluginNames.try_emplace(NormalizePluginName(displayName),
+                                       displayName);
       }
     }
     lines.push_back(std::move(line));
@@ -254,10 +359,111 @@ std::size_t DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
     throw std::runtime_error("Could not read plugins.txt");
   }
   input.close();
-  if (disabledCount == 0) {
+
+  std::set<std::string> enabledTargets;
+  for (const auto &[normalizedName, displayName] : enabledPluginNames) {
+    if (a_disabledPlugins.contains(normalizedName)) {
+      enabledTargets.insert(normalizedName);
+    }
+  }
+  if (enabledTargets.empty()) {
     logs::info("No configured plugins were enabled in {}",
                a_pluginsListPath.string());
     return 0;
+  }
+
+  std::map<std::string, std::set<std::string>> pluginMasters;
+  std::vector<std::string> unreadablePluginHeaders;
+  const auto dataDirectory = GetExecutablePath().parent_path() / L"Data";
+  for (const auto &[normalizedName, displayName] : enabledPluginNames) {
+    const auto pluginHeaderPath =
+        dataDirectory / std::filesystem::path(TrimPluginName(displayName));
+    const auto masters = ReadPluginMasters(pluginHeaderPath);
+    if (!masters) {
+      unreadablePluginHeaders.push_back(displayName);
+      logs::error("Cannot read dependency header {} for enabled plugin {} "
+                  "while processing {}",
+                  pluginHeaderPath.string(), displayName,
+                  a_pluginsListPath.string());
+      continue;
+    }
+    pluginMasters.emplace(normalizedName, *masters);
+  }
+
+  if (!unreadablePluginHeaders.empty()) {
+    logs::warn("No changes made to {}: {} enabled plugin header(s) could not "
+               "be inspected; see preceding log entries",
+               a_pluginsListPath.string(), unreadablePluginHeaders.size());
+    return 0;
+  }
+
+  std::set<std::string> blockedTargets;
+  std::map<std::string, std::set<std::string>> blockingDependents;
+  bool foundNewlyBlockedTarget = true;
+  while (foundNewlyBlockedTarget) {
+    foundNewlyBlockedTarget = false;
+    for (const auto &[dependentName, masters] : pluginMasters) {
+      const bool dependentWillRemainEnabled =
+          !enabledTargets.contains(dependentName) ||
+          blockedTargets.contains(dependentName);
+      if (!dependentWillRemainEnabled) {
+        continue;
+      }
+
+      for (const auto &masterName : masters) {
+        if (enabledTargets.contains(masterName) &&
+            blockedTargets.insert(masterName).second) {
+          blockingDependents[masterName].insert(dependentName);
+          foundNewlyBlockedTarget = true;
+        } else if (blockedTargets.contains(masterName)) {
+          blockingDependents[masterName].insert(dependentName);
+        }
+      }
+    }
+  }
+
+  logs::info(
+      "----------------------------------------------------------------");
+  for (const auto &[masterName, dependentNames] : blockingDependents) {
+    for (const auto &dependentName : dependentNames) {
+      logs::warn("Not disabling {} in {} because enabled plugin {} depends "
+                 "on it",
+                 enabledPluginNames.at(masterName), a_pluginsListPath.string(),
+                 enabledPluginNames.at(dependentName));
+    }
+  }
+
+  auto safeTargets = enabledTargets;
+  for (const auto &blockedTarget : blockedTargets) {
+    safeTargets.erase(blockedTarget);
+  }
+  if (safeTargets.empty()) {
+    logs::warn("No configured plugins were disabled in {} because each is a "
+               "master of an enabled plugin",
+               a_pluginsListPath.string());
+    return 0;
+  }
+
+  std::vector<std::string> disabledPluginNames;
+  std::size_t disabledCount = 0;
+  for (auto &pluginLine : lines) {
+    auto marker = pluginLine.find_first_not_of(" \t");
+    if (marker == std::string::npos) {
+      continue;
+    }
+    if (pluginLine.compare(marker, 3, "\xEF\xBB\xBF") == 0) {
+      marker += 3;
+    }
+    if (marker >= pluginLine.size() || pluginLine[marker] != '*') {
+      continue;
+    }
+
+    const auto pluginName = NormalizePluginName(pluginLine.substr(marker + 1));
+    if (safeTargets.contains(pluginName)) {
+      disabledPluginNames.push_back(pluginLine.substr(marker + 1));
+      pluginLine.erase(marker, 1);
+      ++disabledCount;
+    }
   }
 
   const auto temporaryPath =
@@ -286,8 +492,6 @@ std::size_t DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
                                 " using temporary file " +
                                 std::filesystem::path(temporaryPath).string());
   }
-  logs::info(
-      "----------------------------------------------------------------");
   logs::info("Disabled {} plugin(s) in {}:", disabledCount,
              a_pluginsListPath.string());
   for (const auto &pluginName : disabledPluginNames) {
@@ -456,9 +660,9 @@ SKSE_PLUGIN_LOAD(const SKSE::LoadInterface *a_skse) {
   pendingSummary = preloadSummary;
   forceTerminateOnVerificationFailure = false;
   try {
-    forceTerminateOnVerificationFailure = ForceTerminateAfterFallback();
+    forceTerminateOnVerificationFailure = ForceTerminateIfPluginsStillPresent();
   } catch (const std::exception &error) {
-    logs::warn("Could not read ForceTerminateAfterFallback setting: {}",
+    logs::warn("Could not read ForceTerminateIfPluginsStillPresent setting: {}",
                error.what());
   }
 

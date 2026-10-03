@@ -47,13 +47,13 @@ After Skyrim finishes loading its plugins, Plugin Disabler checks whether any
 plugin it changed is still loaded in the current session. If none are loaded,
 it reports that verification succeeded. If any remain loaded, the message box
 offers to quit Skyrim without listing each plugin; the names of still-loaded
-plugins are written to `PluginDisabler.log`. Set `ForceTerminateAfterFallback=1` to make any
+plugins are written to `PluginDisabler.log`. Set `ForceTerminateIfPluginsStillPresent=1` to make any
 verification-failure message OK-only and quit the game when acknowledged,
 regardless of SKSE version. The default is `1`, which will autoclose the game.
 
 ```ini
 [General]
-ForceTerminateAfterFallback=1
+ForceTerminateIfPluginsStillPresent=1
 ```
 
 On SKSE 2.2.7 and newer, the plugin still edits `plugins.txt` during preload,
@@ -74,6 +74,13 @@ The post-load message only offers to quit when a plugin that was changed is
 actually present in the current session. The INI option controls whether
 acknowledging that message force-terminates the game or presents a Yes/No choice,
 regardless of SKSE version.
+
+Before editing each `plugins.txt`, the plugin reads enabled plugins' TES4
+headers and checks their `MAST` dependencies. Requested dependents and masters
+can be disabled together in the same edit. A requested master is left enabled
+if any dependent will remain enabled, and the log names the dependent that
+blocked it. If an enabled plugin header cannot be read, no requested entries
+are changed in that `plugins.txt`, because its dependencies cannot be verified.
 
 Invalid JSON files and invalid plugin names are skipped and reported in the
 SKSE log.
@@ -105,4 +112,5 @@ For IntelliSense, install clangd in VS Code.
 - [ ] test on SkyrimVR
 - [X] add an ingame notification for the amount of plugins disabled
 - [X] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available
-- [ ] When a plugin is disabled that has dependent plugins, differ disabling it until the end, and if it's dependent plugins have not been disabled still, then give the user a warning and don't disable them. The game seems to reenable these on the next launch, so test if this is Vanilla behavior or not. Look into looking through plugins.txt in reverse so that hopefully dependents are disabled first.
+- [ ] add automated unit testing for plugin
+- [x] check if a plugin will be disabled if it depends on a master, not just if it already has been
