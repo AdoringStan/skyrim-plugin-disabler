@@ -68,11 +68,10 @@ std::filesystem::path GetLocalAppDataPath() {
   return std::filesystem::path(std::wstring(buffer.data(), length));
 }
 
-// Convert plugin names into a consistent comparison key. This trims outer
-// whitespace, tolerates a leading plugins.txt enabled marker '*', trims again,
-// and lowercases the result. Returning a copy allows the caller to normalize
-// its string without changing the original spelling used for display/logging.
-std::string NormalizePluginName(std::string a_name) {
+// Remove only surrounding whitespace while preserving filename case. This is
+// important on Proton/Linux, where the real filesystem can be case-sensitive:
+// comparisons use normalized names, but opening a file needs its actual name.
+std::string TrimPluginName(std::string a_name) {
   const auto isWhitespace = [](unsigned char a_character) {
     return std::isspace(a_character) != 0;
   };
@@ -80,23 +79,23 @@ std::string NormalizePluginName(std::string a_name) {
       std::find_if_not(a_name.begin(), a_name.end(), isWhitespace);
   const auto last =
       std::find_if_not(a_name.rbegin(), a_name.rend(), isWhitespace).base();
-  if (first >= last) {
-    return {};
-  }
+  return first < last ? std::string(first, last) : std::string{};
+}
 
-  a_name = std::string(first, last);
+// Convert plugin names into a consistent comparison key. This trims outer
+// whitespace, tolerates a leading plugins.txt enabled marker '*', trims again,
+// and lowercases the result. Returning a copy allows the caller to normalize
+// its string without changing the original spelling used for display/logging.
+std::string NormalizePluginName(std::string a_name) {
+  a_name = TrimPluginName(std::move(a_name));
   if (!a_name.empty() && a_name.front() == '*') {
     a_name.erase(a_name.begin());
   }
-  const auto trimmedFirst =
-      std::find_if_not(a_name.begin(), a_name.end(), isWhitespace);
-  const auto trimmedLast =
-      std::find_if_not(a_name.rbegin(), a_name.rend(), isWhitespace).base();
-  if (trimmedFirst >= trimmedLast) {
+  a_name = TrimPluginName(std::move(a_name));
+  if (a_name.empty()) {
     return {};
   }
 
-  a_name = std::string(trimmedFirst, trimmedLast);
   std::transform(a_name.begin(), a_name.end(), a_name.begin(),
                  [](unsigned char a_character) {
                    return static_cast<char>(std::tolower(a_character));
@@ -113,20 +112,6 @@ bool IsPluginFilename(const std::string &a_name) {
   }
   const auto extension = std::filesystem::path(a_name).extension().string();
   return extension == ".esp" || extension == ".esl" || extension == ".esm";
-}
-
-// Remove only surrounding whitespace while preserving filename case. This is
-// important on Proton/Linux, where the real filesystem can be case-sensitive:
-// comparisons use normalized names, but opening a file needs its actual name.
-std::string TrimPluginName(std::string a_name) {
-  const auto isWhitespace = [](unsigned char a_character) {
-    return std::isspace(a_character) != 0;
-  };
-  const auto first =
-      std::find_if_not(a_name.begin(), a_name.end(), isWhitespace);
-  const auto last =
-      std::find_if_not(a_name.rbegin(), a_name.rend(), isWhitespace).base();
-  return first < last ? std::string(first, last) : std::string{};
 }
 
 // TES4 records store numeric fields in little-endian byte order. These helpers
