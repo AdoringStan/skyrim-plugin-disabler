@@ -114,8 +114,13 @@ bool IsPluginFilename(const std::string &a_name) {
   return extension == ".esp" || extension == ".esl" || extension == ".esm";
 }
 
-// TES4 records store numeric fields in little-endian byte order. These helpers
-// combine the individual bytes into ordinary C++ integer values.
+// The next few functions are necesarry because the plugins are not loaded into
+// game-data yet, and CLib functions for reading plugin data only work on
+// plugins loaded into game-data.
+
+// TES4 records store numeric fields in
+// little-endian byte order. These helpers combine the individual bytes into
+// ordinary C++ integer values.
 std::uint16_t ReadUInt16LE(const unsigned char *a_data) {
   return static_cast<std::uint16_t>(a_data[0]) |
          static_cast<std::uint16_t>(a_data[1] << 8);
@@ -237,8 +242,8 @@ DisableSummary pendingSummary;
 bool forceTerminateOnVerificationFailure{};
 
 // Read all JSON arrays in the config directory and merge their plugin names.
-// A set naturally removes duplicates and gives case-insensitive behavior
-// because names are normalized before insertion.
+// A set naturally removes duplicates. Names are normalized before insertion
+// into the set.
 std::set<std::string>
 ReadDisabledPlugins(const std::filesystem::path &a_configDirectory) {
   std::set<std::string> disabledPlugins;
@@ -252,6 +257,8 @@ ReadDisabledPlugins(const std::filesystem::path &a_configDirectory) {
 
   for (const auto &entry :
        std::filesystem::directory_iterator(a_configDirectory)) {
+
+    // skip if not a json file
     if (!entry.is_regular_file() ||
         NormalizePluginName(entry.path().extension().string()) != ".json") {
       continue;
@@ -308,6 +315,7 @@ std::filesystem::path GetPluginsListPath() {
   const auto executable = GetExecutablePath().filename();
   const auto gameFolder =
       executable == L"SkyrimVR.exe" ? L"Skyrim VR" : L"Skyrim Special Edition";
+  logs::info("{} detected", gamefolder.string());
   return GetLocalAppDataPath() / gameFolder / L"plugins.txt";
 }
 
@@ -326,8 +334,8 @@ bool ForceTerminateIfPluginsStillPresent() {
                                iniPath.c_str()) == 1;
 }
 
-// Return every load-order file this run should update. The standard AppData
-// file is always first; numbered INI entries add manager/profile files. Keeping
+// Return every plugins.txt file this run should update. The standard AppData
+// file is always first; numbered INI entries add mod manager files. Keeping
 // the default first lets RunPluginDisabler use index zero for its user-facing
 // AppData count. Lexical normalization prevents obvious duplicate paths.
 std::vector<std::filesystem::path>
@@ -470,6 +478,8 @@ std::size_t DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
   bool foundNewlyBlockedTarget = true;
   while (foundNewlyBlockedTarget) {
     foundNewlyBlockedTarget = false;
+    // check if a plugin will be disabled - if so, we don't need to check its
+    // masters so continue the loop.
     for (const auto &[dependentName, masters] : pluginMasters) {
       const bool dependentWillRemainEnabled =
           !enabledTargets.contains(dependentName) ||
@@ -479,6 +489,11 @@ std::size_t DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
       }
 
       for (const auto &masterName : masters) {
+        // check if plugins to be disable contains the current master file. If
+        // so, block that plugin from being disabled. If the blocked target
+        // being added hasn't been added before (eg, from another plugin
+        // requiring it), add it to the blocking dependents list. If it has been
+        // added before, add the blocking dependent to the existing list.
         if (enabledTargets.contains(masterName) &&
             blockedTargets.insert(masterName).second) {
           blockingDependents[masterName].insert(dependentName);
@@ -569,8 +584,6 @@ std::size_t DisableListedPlugins(const std::filesystem::path &a_pluginsListPath,
              a_pluginsListPath.string());
   for (const auto &pluginName : disabledPluginNames) {
     logs::info("  {}", pluginName);
-  }
-  for (const auto &pluginName : disabledPluginNames) {
     a_changedPlugins.insert(NormalizePluginName(pluginName));
   }
   return disabledCount;
@@ -668,7 +681,8 @@ void ShowDisableSummary(const DisableSummary &a_summary,
     }
   } else {
     message += L"\n\nVerification complete: none of the plugins changed by "
-               L"PluginDisabler are loaded in this game session.";
+               L"PluginDisabler are loaded in this game session. The game can "
+               L"safely continue loading";
     flags |= MB_OK;
   }
 
