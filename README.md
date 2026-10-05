@@ -1,7 +1,7 @@
 # Plugin Disabler
-Plugin Disabler is an SKSE plugin that automatically disables Skyrim plugins (esl, esp, and esm files) on game load. On older versions of Skyrim this will require a restart. If no plugins are disabled, then nothing happens and your game launches as usual.
+Plugin Disabler is an SKSE plugin that automatically disables Skyrim plugins (esl, esp, and esm files) on game load. This may require a restart depending on how fast your game loads, and is less likely on newer versions of Skyrim. If no plugins are disabled, then nothing happens and your game launches as usual.
 
-Back up your load order before use.
+!!!Back up your load order before use!!!
 
 ## y tho?
 I have a few use cases for this actually:
@@ -65,6 +65,11 @@ finds one or more targeted plugins still loaded.
 - SKSE
 - Address Library
 
+## caveats
+- Smaller load orders are more likely to need to restart after launch because the game loads faster than the plugin can work. This is less likely on newer Skyrim/SKSE versions.
+- Creation Club content acts weird when disabled. This is a native Skyrim thing, not a Plugin Disabler thing. Avoid disabling CC content (and vanilla content) with this.
+- The popup window confirming a plugin disabler run may minimize the Skyrim window in some instances.
+
 # how it works
 The plugin combines the names from all JSON files in SKSE/Plugins/PluginDisabler, ignoring filename case and duplicate entries. It removes the enabled `*` marker from matching lines in
 `%LOCALAPPDATA%/Skyrim Special Edition/plugins.txt` (or `Skyrim VR/plugins.txt`
@@ -112,7 +117,7 @@ I'm not sure on how to build for Windows since I do not have a Windows system, b
 For IntelliSense, install clangd in VS Code.
 
 ## TODO
-- [ ] test preload support on latest Skyrim version
+- [X] test preload support on latest Skyrim version
 - [ ] test on SkyrimVR
 - [X] add an ingame notification for the amount of plugins disabled
 - [X] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available
