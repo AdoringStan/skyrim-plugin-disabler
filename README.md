@@ -91,7 +91,7 @@ I used AI to help build this. It is tested and confirmed to be working on my end
 
 # For Developers
 
-This has completely open permissions. If you would like to improve on this or want to steal the idea to completely redo it from the ground up for better performance and/or functionality, then please feel free to do so. The only request that I have is that you let me know so I can check it out myself. 🙂
+This has completely open permissions. If you would like to improve on this or want to steal the idea to completely redo it from the ground up for better performance and/or functionality, then please feel free to do so. The only request that I have is that you would keep it backwards compatible, but of course with open source even that is optional. 🙂
 
 ## Building
 
