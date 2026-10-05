@@ -69,6 +69,7 @@ finds one or more targeted plugins still loaded.
 - Smaller load orders are more likely to need to restart after launch because the game loads faster than the plugin can work. This is less likely on newer Skyrim/SKSE versions.
 - Creation Club content acts weird when disabled. This is a native Skyrim thing, not a Plugin Disabler thing. Avoid disabling CC content (and vanilla content) with this.
 - The popup window confirming a plugin disabler run may minimize the Skyrim window in some instances.
+- While I own SkyrimVR, I do not have a headset, and since the game won't open for me without one, I can't test it. I will need to work with VR users to get this working. I'd like to do this because I can especially see this being helpful for VR users since they can't use esl plugins.
 
 # how it works
 The plugin combines the names from all JSON files in SKSE/Plugins/PluginDisabler, ignoring filename case and duplicate entries. It removes the enabled `*` marker from matching lines in
@@ -118,13 +119,13 @@ For IntelliSense, install clangd in VS Code.
 
 ## TODO
 - [X] test preload support on latest Skyrim version
-- [ ] test on SkyrimVR
 - [X] add an ingame notification for the amount of plugins disabled
 - [X] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available
 - [ ] add automated unit testing for plugin
 - [x] check if a plugin will be disabled if it depends on a master, not just if it already has been
 - [ ] insure that the game is still able to load plugins who's masters are being checked in ReadPluginMasters() since it's opening a file stream for each plugin while the game loads
 - [ ] attempt to replace the custom esp header reading functions with [Ortham/esplugin](https://github.com/ortham/esk)
-- [ ] check if extra plugins.txt paths in ini actually need to be numbered or not
 - [ ] instead of procesing each plugins.txt individually, just process the main game's plugins.txt and replace the others with it
 - [ ] clean up ini for release
+- [ ] ~~test on SkyrimVR~~ I can't do this on my own - I need someone with VR to help with this.
+- [ ] ~~check if extra plugins.txt paths in ini actually need to be numbered or not~~ it looks like the way ini files are read in cpp this wouldn't work.
