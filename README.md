@@ -61,6 +61,10 @@ before Skyrim loads its plugins, and then verifies the result after the
 data-loaded message. The setting changes only what happens if verification
 finds one or more targeted plugins still loaded.
 
+## requirements
+- SKSE
+- Address Library
+
 # how it works
 The plugin combines the names from all JSON files in SKSE/Plugins/PluginDisabler, ignoring filename case and duplicate entries. It removes the enabled `*` marker from matching lines in
 `%LOCALAPPDATA%/Skyrim Special Edition/plugins.txt` (or `Skyrim VR/plugins.txt`
@@ -118,3 +122,4 @@ For IntelliSense, install clangd in VS Code.
 - [ ] attempt to replace the custom esp header reading functions with [Ortham/esplugin](https://github.com/ortham/esk)
 - [ ] check if extra plugins.txt paths in ini actually need to be numbered or not
 - [ ] instead of procesing each plugins.txt individually, just process the main game's plugins.txt and replace the others with it
+- [ ] clean up ini for release
