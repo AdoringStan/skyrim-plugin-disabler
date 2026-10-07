@@ -121,12 +121,12 @@ For IntelliSense, install clangd in VS Code.
 - [X] test preload support on latest Skyrim version
 - [X] add an ingame notification for the amount of plugins disabled
 - [X] add an .ini option to automatically close and relaunch the game after plugins.txt is modified if preload isn't available
-- [ ] add automated unit testing for plugin
 - [x] check if a plugin will be disabled if it depends on a master, not just if it already has been
-- [ ] insure that the game is still able to load plugins who's masters are being checked in ReadPluginMasters() since it's opening a file stream for each plugin while the game loads
-- [ ] attempt to replace the custom esp header reading functions with [Ortham/esplugin](https://github.com/ortham/esk)
-- [ ] instead of procesing each plugins.txt individually, just process the main game's plugins.txt and replace the others with it
+- [x] insure that the game is still able to load plugins who's masters are being checked in ReadPluginMasters() since it's opening a file stream for each plugin while the game loads
 - [ ] consider moving some of the code into another file
 - [ ] clean up ini for release
+- [ ] ~~add automated unit testing for plugin~~ "I ain't doing all that" - current me to the perfectionist me at the begining of this project
+- [ ] ~~instead of procesing each plugins.txt individually, just process the main game's plugins.txt and replace the others with it~~ no, because some users might want to have plugins disabled in mod profiles they aren't using
+- [ ] ~~attempt to replace the custom esp header reading functions with [Ortham/esplugin](https://github.com/ortham/esk)~~ will use current implimentation for now until this ever becomes necesarry (update breaks plugins, run into compressed plugin headers, etc)
 - [ ] ~~test on SkyrimVR~~ I can't do this on my own - I need someone with VR to help with this.
 - [ ] ~~check if extra plugins.txt paths in ini actually need to be numbered or not~~ it looks like the way ini files are read in cpp this wouldn't work.
